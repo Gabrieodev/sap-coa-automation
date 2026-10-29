@@ -50,13 +50,19 @@ def _args():
     return p.parse_args()
 
 
-def _sap_real(cfg, log):
+def _conectar_sap_real(cfg, log):
     from src.sap.dialogo_arquivo import DialogoArquivo
     from src.sap.navegacao import SapNavigation
     from src.sap.pedidos import SapPedidos
     nav = SapNavigation()  # levanta SapNaoAbertoError / SapNaoLogadoError se for o caso
     return SapPedidos(nav, DialogoArquivo(cfg.timeout_dialogo_arquivo), cfg.transacao,
                       cfg.timeout_sap, cfg.coluna_titulo_anexos, log)
+
+
+def _sap_real(cfg, log):
+    """SAP real, mas só conecta quando algum pedido realmente precisar (ver preguicoso.py)."""
+    from src.sap.preguicoso import SapPreguicoso
+    return SapPreguicoso(lambda: _conectar_sap_real(cfg, log), log)
 
 
 def _sap_simulado():

@@ -13,7 +13,7 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements-dev.txt
 
-python -m pytest                      :: 108 testes, rodam sem SAP
+python -m pytest                      :: 122 testes, rodam sem SAP
 python scripts\gerar_base_ficticia.py :: (re)cria planilha e pastas de demonstração
 python main.py --simulado             :: roda tudo contra um SAP de mentirinha
 python main.py --simulado --dry-run   :: idem, sem alterar a planilha
@@ -97,6 +97,11 @@ Defina por variável de ambiente (ou edite `config.py`). No `cmd`: `set COA_PLAN
 
 ## Checklist antes da primeira execução real
 
+0. **Rode `python scripts\verificar_planilha.py "<caminho da base>"` numa cópia da planilha real.**
+   O robô grava com openpyxl, que reescreve o arquivo inteiro e descarta o que não conhece
+   (conexões de dados/Power Query, segmentações, comentários encadeados, formas...). O script mostra
+   o que seria perdido (código de saída 1 = perderia algo importante; nesse caso use
+   `COA_GRAVAR_STATUS_NA_PLANILHA=nao`). Ele nunca altera o arquivo original.
 0. Na planilha, crie a coluna de **STATUS** ao lado de PEDIDO SAP (título preenchido) e, na base
    antiga, marque `JÁ ANEXADO` onde o COA já foi anexado.
 1. `set COA_PLANILHA=...` e `set COA_RAIZ_ARQUIVOS=...` (e `COA_ABA`/`COA_COL_STATUS` se necessário).
@@ -147,6 +152,40 @@ resolve). O robô só processa o que estiver em branco.
   caiu/deslogou, 3 falhas técnicas seguidas, planilha inválida, Ctrl+C).
 * Linhas não alcançadas por causa de um aborto continuam em branco e entram na próxima execução.
 
+## Execução diária (Agendador de Tarefas)
+
+O robô foi feito para rodar todo dia sem desperdiçar tempo:
+* Linhas `JÁ ANEXADO` (e `IGNORADO`, `ERRO`, ou texto manual) **não abrem pasta nem pedido**; só as
+  linhas em branco são processadas.
+* **Sem nada pendente, o robô nem conecta ao SAP** e termina com código `0` em segundos. O SAP só é
+  acionado quando o primeiro pedido realmente precisar dele.
+* Pedidos novos na planilha são pegos automaticamente no dia seguinte.
+
+**Configuração no Agendador** (Win+R → `taskschd.msc` → Criar Tarefa):
+
+| Aba | Ajuste |
+|---|---|
+| Geral | **"Executar somente quando o usuário estiver conectado"** — o SAP GUI e a janela "Abrir" exigem a sessão do Windows aberta (não use "executar estando o usuário conectado ou não") |
+| Disparadores | diário, num horário em que o SAP esteja **aberto e logado** nesse usuário |
+| Ações | Programa: `executar_robo.bat` (caminho completo) · Argumentos (opcional): `--reprocessar-erros` · Iniciar em: a pasta do projeto |
+| Condições | desmarque "Iniciar somente com energia CA" se for notebook |
+| Configurações | "Interromper se executar por mais de" ex. 2 horas · "Se já estiver em execução, **não** iniciar nova instância" |
+
+Edite os caminhos no início de `executar_robo.bat` (uma vez).
+
+**`--reprocessar-erros` no agendamento?** Sem ele, uma linha que deu `ERRO` fica parada até alguém
+limpar o status. Com ele, o robô tenta de novo todo dia: útil quando o erro foi "pasta ainda não
+existe no SharePoint" (falha antes de abrir o SAP, custo zero). O custo são erros definitivos do
+SAP (pedido inexistente/bloqueado), que reabrem o pedido todo dia — para pará-los, escreva um texto
+manual na célula de status (ex.: `SEM COA`).
+
+**Como saber se deu certo:** `Último Resultado da Execução` no Agendador (`0x0` = tudo certo,
+`0x1` = houve linhas com `ERRO`, `0x2` = abortou) e os arquivos em `logs\`.
+
+**Atenção:** a tarefa não funciona com o SAP deslogado (por inatividade, por exemplo) nem com a
+planilha aberta no Excel. Teste antes com a tela bloqueada se pretende depender disso. Cada execução
+que grava na planilha gera um backup em `logs\backup_planilha`; apague os antigos de vez em quando.
+
 ## Como o robô lida com erros
 
 | Situação | Comportamento |
@@ -196,8 +235,8 @@ src/sap/seletores.py       IDs de tela do SAP
 src/sap/pedidos.py         abrir pedido, listar anexos, anexar (única classe que conhece telas)
 src/sap/dialogo_arquivo.py janela "Abrir" do Windows (pywinauto, em thread)
 src/sap/simulado.py        SAP de mentirinha p/ testes e --simulado
-scripts/gerar_base_ficticia.py · scripts/diagnostico_sap.py
-tests/                     108 testes (planilha e status, arquivos, processador, SapPedidos c/ sessão falsa, main ponta a ponta)
+scripts/gerar_base_ficticia.py · scripts/diagnostico_sap.py · scripts/verificar_planilha.py
+tests/                     122 testes (planilha e status, arquivos, processador, SapPedidos c/ sessão falsa, main ponta a ponta)
 ```
 
 ## Próximos passos possíveis
