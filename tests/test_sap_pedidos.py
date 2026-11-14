@@ -131,18 +131,18 @@ def s():
 
 @pytest.fixture
 def sap(s):
-    return SapPedidos(SapNavigation(s), DialogoFalso(s), "ME23N", timeout=1)
+    return SapPedidos(SapNavigation(s), DialogoFalso(s), "ME22N", timeout=1)
 
 
 def test_abrir_pedido_ok(s, sap):
     sap.abrir_pedido("4500001001")
-    assert ("start", "ME23N") in s.eventos
+    assert ("start", "ME22N") in s.eventos
     assert s.el(sel.CAMPO_PEDIDO_DIALOGO).text == "4500001001"
     assert s.popups == 0
 
 
 def test_nao_reabre_transacao_se_ja_estiver_nela(s, sap):
-    s.transacao = "ME23N"
+    s.transacao = "ME22N"
     sap.abrir_pedido("4500001001")
     assert not any(e[0] == "start" for e in s.eventos)
 
@@ -214,3 +214,28 @@ def test_dialogo_sem_pywinauto_falha_com_mensagem_clara(monkeypatch):
     tarefa = DialogoArquivo(timeout=1).iniciar(Path("x.pdf"))
     with pytest.raises(AnexoFalhouError, match="pywinauto"):
         tarefa.aguardar(2)
+
+
+# ------------------------------------------------------------------ ME22N: soltar o bloqueio ao terminar
+def test_transacao_padrao_e_me22n():
+    import config as cfg_mod
+    assert cfg_mod.Config().transacao == "ME22N"
+    assert SapPedidos(SapNavigation(SessaoFalsa()), None).transacao == "ME22N"
+
+
+def test_encerrar_sai_da_transacao_para_soltar_o_bloqueio(s, sap):
+    sap.abrir_pedido("4500001001")
+    assert s.transacao == "ME22N"
+    sap.encerrar()
+    assert s.transacao == "SESSION_MANAGER" and ("start", "SESSION_MANAGER") in s.eventos
+
+
+def test_encerrar_sem_ter_aberto_nada_nao_faz_nada(s, sap):
+    sap.encerrar()
+    assert ("start", "SESSION_MANAGER") not in s.eventos
+
+
+def test_encerrar_nunca_levanta_mesmo_com_sessao_morta(s, sap):
+    sap.abrir_pedido("4500001001")
+    s.morta = True
+    sap.encerrar()          # não pode derrubar a execução (log de aviso apenas)

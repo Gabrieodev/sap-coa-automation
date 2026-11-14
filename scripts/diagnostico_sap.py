@@ -35,7 +35,8 @@ def main():
     nav = passo("Conectar ao SAP e obter sessão", SapNavigation)
     if not nav:
         return
-    sap = SapPedidos(nav, DialogoArquivo(), cfg.transacao, cfg.timeout_sap, cfg.coluna_titulo_anexos)
+    dialogo = DialogoArquivo(cfg.timeout_dialogo_arquivo, espera_seguranca=cfg.espera_janela_seguranca)
+    sap = SapPedidos(nav, dialogo, cfg.transacao, cfg.timeout_sap, cfg.coluna_titulo_anexos)
 
     passo(f"Abrir pedido {pedido} na {cfg.transacao}", lambda: sap.abrir_pedido(pedido))
     passo("Barra de status", nav.status_barra)

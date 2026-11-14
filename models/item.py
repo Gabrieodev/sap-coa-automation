@@ -19,6 +19,7 @@ class ItemControle:
     observacao: str = ""
     erro_validacao: str | None = None  # preenchido pela leitura se a linha é inválida
     duplicado: bool = False            # cópia exata de outra linha (mesmo pedido+processo)
+    criterio: str = ""                 # valor da coluna-filtro da base (ver Config.col_filtro)
 
     def deve_processar(self, reprocessar_erros: bool = False) -> bool:
         s = (self.status or "").strip().upper()

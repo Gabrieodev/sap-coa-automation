@@ -45,6 +45,10 @@ class AnexoFalhouError(ErroDeItem):
     tecnico = True
 
 
+class AnexoAmbiguoError(ErroDeItem):
+    """Arquivos com o mesmo nome-base na pasta e anexos parciais no pedido: precisa de olho humano."""
+
+
 class AnexoNaoConfirmadoError(ErroDeItem):
     """O anexo foi enviado, mas não aparece na lista de anexos do pedido."""
     tecnico = True

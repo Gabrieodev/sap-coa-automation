@@ -1,4 +1,7 @@
-"""Operações do robô sobre um pedido na ME23N: abrir, listar anexos, anexar.
+"""Operações do robô sobre um pedido na ME22N: abrir, listar anexos, anexar.
+
+Fluxo de anexo: com o pedido aberto na ME22N, Serviços para objeto > Criar > Criar anexo; o
+Windows abre "Abrir" (arquivo) e o SAP GUI pede confirmação ("Permitir") — ver dialogo_arquivo.py.
 
 É a ÚNICA classe que conhece telas e IDs do SAP. O restante do robô só enxerga estes
 quatro métodos, o que permite trocar por `SapSimulado` nos testes.
@@ -49,7 +52,7 @@ def _classificar_erro_status(texto: str, pedido: str) -> Exception:
 
 class SapPedidos:
     def __init__(self, nav: SapNavigation, dialogo: DialogoArquivo,
-                 transacao: str = "ME23N", timeout: int = 30,
+                 transacao: str = "ME22N", timeout: int = 30,
                  coluna_titulo_anexos: str = "BITM_DESCR", log=None):
         self.nav = nav
         self.dialogo = dialogo
@@ -66,7 +69,7 @@ class SapPedidos:
             self.nav.abrir_transacao(self.transacao)
             self.nav.aguardar(self.timeout)
 
-        # a ME23N às vezes já abre o diálogo "Outro pedido" sozinha
+        # a ME22N às vezes já abre o diálogo "Outro pedido" sozinha
         if not self.nav.existe(sel.CAMPO_PEDIDO_DIALOGO):
             self.nav.obter(sel.BTN_OUTRO_PEDIDO).press()
             self.nav.aguardar(self.timeout)
@@ -106,6 +109,20 @@ class SapPedidos:
         tipo, texto = self.nav.status_barra()
         if tipo in ("E", "A"):
             raise AnexoFalhouError(f"SAP recusou o anexo '{Path(caminho).name}': {texto}")
+
+    # ----------------------------------------------------------------- encerramento
+    def encerrar(self) -> None:
+        """A ME22N BLOQUEIA o pedido aberto para os demais usuários. Ao terminar, sai da transação
+        (tela inicial do SAP) para soltar o bloqueio do último pedido. Nunca derruba a execução."""
+        try:
+            self.limpar_popups()
+            if self.nav.transacao_atual() == self.transacao:
+                self.nav.abrir_transacao("SESSION_MANAGER")
+                self.nav.aguardar(self.timeout)
+        except Exception as e:
+            if self.log:
+                self.log.warning("Não consegui sair da %s ao terminar (o último pedido pode ficar "
+                                 "bloqueado até a sessão SAP fechar): %s", self.transacao, e)
 
     # ----------------------------------------------------------------- limpeza
     def limpar_popups(self, max_tentativas: int = 5) -> None:

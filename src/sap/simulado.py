@@ -50,5 +50,9 @@ class SapSimulado:
         if self.atual not in self.nao_confirma:
             self.anexos[self.atual].append(Path(caminho).stem)
 
+    def encerrar(self) -> None:
+        if self.atual is not None:       # como o real: só sai da transação se chegou a abrir pedido
+            self.chamadas.append(("encerrar",))
+
     def limpar_popups(self) -> None:
         self.chamadas.append(("limpar",))

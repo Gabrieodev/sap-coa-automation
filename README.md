@@ -2,9 +2,62 @@
 
 Robô que substitui o processo manual de **anexar o COA de comex no pedido de compra (SAP)**.
 
-Para cada linha da planilha de controle (`pedido_sap` ↔ `processo`), o robô localiza a pasta do
-processo no SharePoint (via pasta sincronizada do OneDrive), abre o pedido na ME23N e anexa os
-PDFs que ainda não estão lá.
+Para cada linha da **base** (`pedido_sap` ↔ `processo`), o robô vai direto à pasta daquele
+processo no SharePoint (via pasta sincronizada do OneDrive), abre o pedido na ME22N e anexa **tudo
+que está na pasta** e que ainda não está no pedido.
+
+## Fluxo (resumo)
+
+`python main.py` roda **de verdade**: SAP real, SharePoint real, base real e documentos reais.
+(Dados fictícios só existem com `--simulado`.)
+
+1. Acha a **base de controle** no SharePoint (`IMPO-ADS/Controle robô COA`): é a cópia da base do
+   Power BI só com os processos que o robô deve enxergar. Se a pasta tiver várias exportações
+   (`DATA BASE - 2026-11-11T152807.964.xlsx`…), usa a **mais recente**.
+2. Lê só as linhas dessa base (colunas `PROCESSO` e `PEDIDO SAP`, achadas pelo **nome do cabeçalho**).
+   Processo que não está na base é ignorado: a pasta dele no SharePoint nem é aberta.
+3. Olha o **status** da linha (coluna `STATUS COA ROBÔ`, no fim da tabela; se a base vai até a CL, ela
+   fica na CM e é **criada** se não existir). Em branco = tem que anexar; `JÁ ANEXADO`, `ERRO` ou outro
+   texto = pula.
+4. Para cada linha a anexar: vai à pasta do processo em `DOCS PROCESSOS IMPORTAÇÃO` (`0226/25` na base
+   = pasta `0226-25` **ou** `0226_25`), abre o pedido na ME22N e anexa **tudo** que está na pasta.
+5. Escreve o resultado (`JÁ ANEXADO`/`ERRO`, motivo, data) nas colunas do robô da mesma linha.
+
+**`--simulado`** troca só o SAP por um de mentirinha. Sem `COA_PLANILHA`, usa também a base e os
+documentos **fictícios** de `data\` (demonstração). Com a base real configurada, ele só roda com
+`--dry-run` (nada é gravado): sem isso o robô gravaria `JÁ ANEXADO` falso na base real e no CSV, e
+nunca mais anexaria esses pedidos. Por isso `--simulado` sem `--dry-run` com a base real é recusado.
+
+Primeira vez no computador: `python scripts\localizar_pastas_sharepoint.py` mostra o que o OneDrive
+sincroniza e o que o robô vai usar (a base e a pasta de documentos precisam estar **sincronizadas**
+no OneDrive: no SharePoint, "Sincronizar" ou "Adicionar atalho ao OneDrive").
+
+## Como o robô trabalha agora
+
+1. **A base manda.** No SharePoint fica uma **cópia da base do Power BI** (colunas com os nomes de
+   sempre; o robô acha `PROCESSO` e `PEDIDO SAP` pelo **nome**, não pela posição). O robô trata só os processos que estão nela; o resto
+   do SharePoint é ignorado — nenhuma pasta fora da base é aberta nem listada. **Nunca mexe na base
+   original do Power BI**: só na cópia.
+2. **Nome do processo → nome da pasta.** Na base é `0226/25`; no SharePoint a `/` vira `-` (ou `_`),
+   então a pasta é `0226-25` ou `0226_25` (se existirem as duas, é erro de ambiguidade). O robô monta esse nome e vai direto nela (sem varrer a biblioteca). Só se não
+   houver pasta com o nome exato ele lista a raiz, **uma vez**, para achar pastas com sufixo
+   (`0002-23 (ANTIGO 1-9145)`). Para proibir essa listagem: `COA_BUSCAR_PASTA_POR_PREFIXO=nao`.
+3. **Anexa tudo da pasta**, não só o COA: PDF, Excel, Word, imagens, txt… Só ficam de fora lixo de
+   sistema/Office (`~$*`, `Thumbs.db`, `desktop.ini`, `.tmp`…) e **subpastas** (o log avisa quando
+   existem). Para restringir tipos: `COA_EXTENSOES_PERMITIDAS=.pdf,.xlsx`.
+4. **Quais linhas da base valem** (opcional): se a base tiver uma coluna que diz se o processo
+   precisa de COA, use `COA_COL_FILTRO` + `COA_FILTRO_PROCESSAR` (ou `COA_FILTRO_IGNORAR`).
+   Linhas fora do critério não abrem pasta nem SAP. Sem `COA_COL_FILTRO`, toda linha da base vale.
+5. **O robô preenche a cópia da base.** Cria no fim da tabela (se não existirem) as colunas
+   `STATUS COA ROBÔ`, `OBS COA ROBÔ` e `DATA COA ROBÔ` e escreve só nelas (`JÁ ANEXADO` ou `ERRO`,
+   motivo/resumo e data). Linhas repetidas do mesmo pedido (uma por material) recebem o mesmo status.
+   Nenhuma outra célula é alterada.
+6. **Cópia nova da base = rodar de novo.** Quando a cópia receber dados novos (mesmo sem as colunas
+   do robô), o robô roda: o que já concluiu **volta a ser preenchido sem abrir o SAP**, e só o que
+   é novo é anexado. Isso funciona porque a memória do robô é o CSV `data\estado_processamento.csv`
+   (chave `pedido + processo`); a coluna na base é o espelho para a equipe. Apagar a linha do CSV
+   (ou `--forcar --pedidos <n>`) refaz um pedido. Texto digitado à mão na coluna de status
+   (ex.: `SEM COA`) é respeitado: a linha é pulada e o texto não é sobrescrito.
 
 ## Início rápido
 
@@ -13,15 +66,21 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements-dev.txt
 
-python -m pytest                      :: 122 testes, rodam sem SAP
-python scripts\gerar_base_ficticia.py :: (re)cria planilha e pastas de demonstração
+python -m pytest                      :: 211 testes, rodam sem SAP
+python scripts\gerar_base_ficticia.py :: (re)cria base e pastas de demonstração
 python main.py --simulado             :: roda tudo contra um SAP de mentirinha
-python main.py --simulado --dry-run   :: idem, sem alterar a planilha
+python main.py --simulado --dry-run   :: idem, sem gravar nada (nem na base, nem no CSV)
+python scripts\localizar_pastas_sharepoint.py :: mostra a base e os documentos REAIS que o robô usaria
+
+:: demo com o critério da base ligado (coluna I = SITUAÇÃO COA; só "PENDENTE" vale):
+set COA_COL_FILTRO=I
+set COA_FILTRO_PROCESSAR=PENDENTE
+python main.py --simulado --dry-run
 ```
 
 ## Rodando de verdade (SAP GUI aberto e logado)
 
-1. `python main.py --teste-conexao` – abre a ME23N (equivale ao `main.py` original).
+1. `python main.py --teste-conexao` – abre a ME22N (equivale ao `main.py` original).
 2. `python scripts\diagnostico_sap.py <pedido real>` – confere os seletores (ver abaixo).
 3. `python main.py --dry-run --limite 3` – SAP real, mas **não anexa** e não altera a planilha.
 4. `python main.py --limite 3` – 3 pedidos de verdade; confira no SAP.
@@ -35,6 +94,7 @@ python main.py --simulado --dry-run   :: idem, sem alterar a planilha
 | `--linhas 2-50` | só as linhas 2 a 50 da planilha (`100-` = da 100 em diante) |
 | `--pedidos 4500… 4500…` | só estes números de pedido |
 | `--reprocessar-erros` | tenta de novo as linhas com `ERRO` |
+| `--forcar` | refaz mesmo o que consta como feito (exige `--pedidos` ou `--linhas`) |
 | `--planilha`, `--pasta-arquivos` | sobrescrevem caminhos do `config.py` |
 
 Saída: `0` tudo certo · `1` houve itens com erro · `2` execução abortada.
@@ -46,25 +106,36 @@ Defina por variável de ambiente (ou edite `config.py`). No `cmd`: `set COA_PLAN
 
 | Variável | O que é | Padrão |
 |---|---|---|
-| `COA_PLANILHA` | caminho da "Base de dados coa" (.xlsx) | `data\controle_coa.xlsx` (demo) |
+| `COA_PLANILHA` | (opcional) base de controle: arquivo `.xlsx` ou **pasta** (usa a mais recente). Sem isso, vem do link `url_base_controle` | pasta `IMPO-ADS/Controle robô COA` |
+| `COA_PADRAO_BASE_CONTROLE` | nome dos arquivos de base quando `COA_PLANILHA` é pasta | `DATA BASE*.xlsx` |
 | `COA_ABA` | nome da aba, se o arquivo tiver várias | primeira aba |
-| `COA_COL_PROCESSO` | coluna do PROCESSO (letra ou nome do cabeçalho) | `G` |
-| `COA_COL_PEDIDO` | coluna do PEDIDO SAP | `H` |
+| `COA_COL_PROCESSO` | coluna do PROCESSO, no formato da base (`0226/25`): nome do cabeçalho (ou letra) | `PROCESSO` |
+| `COA_COL_PEDIDO` | coluna do PEDIDO SAP: nome do cabeçalho (ou letra) | `PEDIDO SAP` |
 | `COA_LINHA_CABECALHO` | linha dos títulos | `1` |
-| `COA_RAIZ_ARQUIVOS` | pasta **sincronizada do OneDrive** que contém as pastas de processo | `data\sharepoint_simulado` (demo) |
+| `COA_RAIZ_ARQUIVOS` | (opcional) pasta **sincronizada do OneDrive** que contém as pastas de processo; sobrepõe o link | vem do link acima |
+| `COA_URL_PASTA_PROCESSOS` | link da pasta de documentos no SharePoint (`IMPO-ADS/DOCS PROCESSOS IMPORTAÇÃO`); dele sai a pasta local | link em `config.py` |
+| `COA_NOME_PASTA_PROCESSOS` | nome da pasta de documentos a procurar | `DOCS PROCESSOS IMPORTAÇÃO` |
 | `COA_PROFUNDIDADE_BUSCA` | `2` se as pastas de processo estiverem dentro de subpastas (ex.: por ano) | `1` |
-| `COA_COL_STATUS` | coluna de **STATUS** onde o robô escreve (você cria a coluna, com título) | `I` |
-| `COA_COL_OBS` | (opcional) coluna para o motivo do ERRO | — |
-| `COA_COL_DATA` | (opcional) coluna para data/hora do processamento | — |
+| `COA_COL_FILTRO` | (opcional) coluna da base que diz se o processo precisa de COA (letra ou cabeçalho) | — (toda linha vale) |
+| `COA_FILTRO_PROCESSAR` | valores (separados por vírgula) que **devem** ser processados; `<vazio>` = célula em branco | — |
+| `COA_FILTRO_IGNORAR` | valores que devem ser **ignorados** (todo o resto vale). Se os dois forem dados, vale `PROCESSAR` | — |
+| `COA_BUSCAR_PASTA_POR_PREFIXO` | se não achar a pasta exata, tenta "começa com" (lista a raiz uma vez) | `sim` |
+| `COA_COL_STATUS` | coluna de **STATUS** que o robô preenche. Por **nome** = criada no fim se não existir; por **letra** = precisa existir, com título. (Na base do BI a coluna I é `DATA CRIAÇÃO PEDIDO`: não use `I`) | `STATUS COA ROBÔ` |
+| `COA_COL_OBS` | coluna do motivo do ERRO / resumo (vazio = não escreve) | `OBS COA ROBÔ` |
+| `COA_COL_DATA` | coluna da data/hora do processamento (vazio = não escreve) | `DATA COA ROBÔ` |
 | `COA_SALVAR_A_CADA` | grava a planilha a cada N pedidos (e sempre ao terminar/abortar/Ctrl+C) | `5` |
 | `COA_BACKUP_PLANILHA` | copia a planilha p/ `logs\backup_planilha` antes da 1ª gravação | `sim` |
-| `COA_GRAVAR_STATUS_NA_PLANILHA` | `nao` = planilha só lida; andamento vai para `COA_ARQUIVO_ESTADO` (CSV) | `sim` |
-| `COA_EXTENSOES_PERMITIDAS` | tipos anexados | `.pdf` |
+| `COA_GRAVAR_STATUS_NA_PLANILHA` | `sim` = preenche as colunas do robô na cópia da base; `nao` = base só lida, andamento só no CSV | `sim` |
+| `COA_ARQUIVO_ESTADO` | CSV com a memória do robô (sempre gravado) | `data\estado_processamento.csv` |
+| `COA_EXTENSOES_PERMITIDAS` | tipos anexados; vazio = **tudo** da pasta (menos lixo) | todos |
 
-* **O robô não acessa a URL do SharePoint.** `sharepoint_url` serve só de referência no log.
-  Ele lê os arquivos da pasta que o OneDrive sincroniza no seu PC (no Explorer, clique em
-  "Sincronizar" na biblioteca do SharePoint e use o caminho que aparecer).
-* **Coluna de status na planilha.** Crie uma coluna ao lado de PEDIDO SAP (por padrão a **I**) com
+* **O robô não baixa nada pela internet.** Ele usa os **links** (`url_base_controle` em `config.py`,
+  `COA_URL_PASTA_PROCESSOS`) só para descobrir qual é a pasta correspondente no disco, dentro do que
+  o OneDrive sincroniza (`C:\Users\<voce>\<empresa>\<site> - Documents\...`). Se não achar, ele
+  **para com uma mensagem** (nunca cai nos dados de demonstração). O link guardado é o do arquivo
+  sem os parâmetros de compartilhamento (`?d=...&csf=...`), que não são necessários.
+* **Coluna de status por letra (opcional).** Por padrão o robô cria as colunas pelo nome. Se preferir
+  uma coluna sua, crie uma coluna ao lado de PEDIDO SAP (por padrão a **I**) com
   um título (ex.: `STATUS`) — o robô não cria nem adivinha a coluna, e recusa rodar se ela não
   tiver título. Regras:
 
@@ -102,11 +173,14 @@ Defina por variável de ambiente (ou edite `config.py`). No `cmd`: `set COA_PLAN
    (conexões de dados/Power Query, segmentações, comentários encadeados, formas...). O script mostra
    o que seria perdido (código de saída 1 = perderia algo importante; nesse caso use
    `COA_GRAVAR_STATUS_NA_PLANILHA=nao`). Ele nunca altera o arquivo original.
-0. Na planilha, crie a coluna de **STATUS** ao lado de PEDIDO SAP (título preenchido) e, na base
-   antiga, marque `JÁ ANEXADO` onde o COA já foi anexado.
-1. `set COA_PLANILHA=...` e `set COA_RAIZ_ARQUIVOS=...` (e `COA_ABA`/`COA_COL_STATUS` se necessário).
-2. `python main.py --simulado --dry-run --limite 5` apontando para a base real: valida leitura da
-   planilha e localização das pastas **sem tocar no SAP e sem gravar na planilha**.
+0. Sincronize no OneDrive a pasta `Controle robô COA` e a `DOCS PROCESSOS IMPORTAÇÃO` e rode
+   `python scripts\localizar_pastas_sharepoint.py`: ele deve mostrar a base mais recente e a pasta de
+   documentos. Se a base já tiver pedidos com COA anexado à mão, marque `JÁ ANEXADO` na coluna
+   `STATUS COA ROBÔ` antes (ou use o critério `COA_COL_FILTRO`).
+1. (só se precisar fixar caminhos) `set COA_PLANILHA=...` e `set COA_RAIZ_ARQUIVOS=...` (e `COA_ABA`).
+2. `python main.py --simulado --dry-run --limite 5`: com a base e os documentos reais resolvidos
+   (o `--simulado` só troca o SAP por um de mentirinha), valida leitura e localização das pastas
+   **sem tocar no SAP e sem gravar na base**.
 3. `python scripts\diagnostico_sap.py <pedido real>` (valida os seletores).
 4. `python main.py --dry-run --linhas 2-6` (SAP real, sem anexar).
 5. `python main.py --linhas 2-6` e confira os anexos no SAP.
@@ -114,12 +188,20 @@ Defina por variável de ambiente (ou edite `config.py`). No `cmd`: `set COA_PLAN
 
 > **Cuidado com linhas antigas.** Se a base tem pedidos cujo COA já foi anexado manualmente, o robô
 > não sabe disso: ele compara o **nome** dos arquivos da pasta com os anexos do pedido e, se o nome
-> for diferente, anexa de novo. Comece por um trecho recente (`--linhas`) e confira.
+> for diferente, anexa de novo. Use o critério da base (`COA_COL_FILTRO`) para deixar de fora o que
+> já foi feito, ou comece por um trecho recente (`--linhas`) e confira.
+>
+> **Pasta que ganha arquivos depois.** Processo concluído (`CONCLUIDO` no CSV) não é revisitado. Se
+> chegarem arquivos novos na pasta depois, apague a linha dele de `estado_processamento.csv` (ou
+> use `--reprocessar-erros` só para os que deram erro) para o robô conferir de novo; ele só anexa o
+> que falta.
 
 ## Planilha de controle
 
-Lê só as colunas configuradas (G = PROCESSO, H = PEDIDO SAP) e escreve só na de status (I).
-Linhas inválidas (pedido vazio/não numérico, processo vazio, mesmo pedido com processos
+Lê só as colunas configuradas (`PROCESSO`, `PEDIDO SAP` e, se ligado, a do critério) e escreve só nas
+colunas do robô (`STATUS COA ROBÔ`, `OBS COA ROBÔ`, `DATA COA ROBÔ`), criadas depois da última coluna
+com título (CL → CM, CN, CO). Cabeçalho repetido (duas colunas `PEDIDO SAP`) é recusado em vez de
+adivinhado. Linhas inválidas (pedido vazio/não numérico, processo vazio, mesmo pedido com processos
 diferentes) viram `ERRO` sem tocar no SAP; duplicatas exatas viram `IGNORADO`.
 
 **Dica para a base antiga:** se há pedidos cujo COA já foi anexado manualmente, preencha a coluna
@@ -131,15 +213,15 @@ resolve). O robô só processa o que estiver em branco.
 **Início**
 1. Lê `config.py` + variáveis `COA_*` e abre `logs\execucao_<data>.log`.
 2. Conecta ao SAP GUI já aberto e logado (se não estiver: encerra com código 2).
-3. Abre a planilha, localiza as colunas (o log mostra letra e cabeçalho de cada uma), lê as linhas e
+3. Abre a base (lê uma cópia local), localiza as colunas (o log mostra letra e cabeçalho de cada uma), lê as linhas e
    valida (pedido vazio/não numérico, processo vazio, conflitos, duplicatas).
-4. Monta a fila: linhas com status em branco (+ `ERRO` se `--reprocessar-erros`), aplicando
-   `--linhas`, `--pedidos` e `--limite`.
+4. Monta a fila: descarta linhas fora do critério da base (se configurado); das restantes, as sem
+   andamento no CSV (+ `ERRO` se `--reprocessar-erros`), aplicando `--linhas`, `--pedidos` e `--limite`.
 
 **Para cada linha da fila**
-1. Procura a pasta do processo (`0226/25` na planilha = pasta `0226-25` no SharePoint) e lista os
-   arquivos elegíveis. Sem pasta / ambígua / sem PDF → `ERRO`, **sem abrir o SAP**.
-2. Abre o pedido na ME23N. Pedido inexistente, bloqueado ou sem autorização → `ERRO`.
+1. Vai direto à pasta do processo (`0226/25` na base = pasta `0226-25` no SharePoint) e lista os
+   arquivos da pasta (menos lixo). Sem pasta / ambígua / vazia → `ERRO`, **sem abrir o SAP**.
+2. Abre o pedido na ME22N. Pedido inexistente, bloqueado ou sem autorização → `ERRO`.
 3. Lista os anexos que o pedido já tem e separa o que falta.
 4. Anexa cada arquivo que falta (Serviços para objeto → Criar anexo → janela "Abrir" do Windows).
 5. Lista de novo e confere que cada arquivo apareceu. Se não apareceu → `ERRO`.
@@ -180,7 +262,18 @@ SAP (pedido inexistente/bloqueado), que reabrem o pedido todo dia — para pará
 manual na célula de status (ex.: `SEM COA`).
 
 **Como saber se deu certo:** `Último Resultado da Execução` no Agendador (`0x0` = tudo certo,
-`0x1` = houve linhas com `ERRO`, `0x2` = abortou) e os arquivos em `logs\`.
+`0x1` = houve linhas com `ERRO`, `0x2` = abortou, `0x3` = já havia outra execução) e os arquivos em `logs\`.
+
+**Duas execuções ao mesmo tempo.** O Agendador já evita duas instâncias da *tarefa*, mas não impede você
+de rodar o robô à mão enquanto a tarefa roda. Por isso o robô cria `data\robo.lock` ao começar e o apaga
+ao terminar; havendo outra execução, ele sai com código `3` sem tocar em nada. Se uma execução morreu
+sem apagar a trava (queda de energia, tarefa interrompida), ela expira sozinha em 3 h
+(`COA_TRAVA_VALIDADE_HORAS`) ou você apaga o arquivo.
+
+**A base tem nome fixo e é sobrescrita pelo Power BI.** Tudo bem: quando a cópia chegar com dados novos
+(sem as colunas do robô), a próxima execução repõe o status do que já foi feito a partir do CSV e só
+anexa o que é novo. Evite rodar o robô no minuto em que a base está sendo substituída; marque o horário
+da tarefa depois da atualização.
 
 **Atenção:** a tarefa não funciona com o SAP deslogado (por inatividade, por exemplo) nem com a
 planilha aberta no Excel. Teste antes com a tela bloqueada se pretende depender disso. Cada execução
@@ -213,11 +306,29 @@ conferidos** (o `diagnostico_sap.py` ajuda):
    (Alt+F12 → *Script Recording and Playback*). O ID do grid da lista de anexos (`GRID_ANEXOS`) é
    o menos certo.
 2. **`coluna_titulo_anexos`** (`config.py`) — nome técnico da coluna de título no grid.
-3. **Janela "Abrir" do Windows** (`src/sap/dialogo_arquivo.py`) — usa `pywinauto`; o título muda
-   com o idioma (ajuste `TITULO_RE`). Roda em thread porque a chamada do SAP bloqueia enquanto a
-   janela estiver aberta.
-4. Se o seu perfil permite **anexar com o pedido em modo de exibição** (ME23N).
+3. **Janelas do Windows no anexo** (`src/sap/dialogo_arquivo.py`) — usa `pywinauto` e trata duas
+   janelas: **"Abrir"** (escolher o arquivo) e **"Segurança do SAP GUI"** (botão **Permitir**), em
+   qualquer ordem; se a segunda não aparecer (alguém marcou "lembrar minha decisão"), segue. Os
+   títulos mudam com o idioma (ajuste `TITULO_RE`, `TITULO_SEGURANCA_RE`, `BOTAO_PERMITIR_RE`).
+   Para ver os títulos e botões EXATOS da sua máquina: `python scripts\listar_janelas.py` e faça um
+   anexo à mão. Roda em thread porque a chamada do SAP bloqueia enquanto a janela estiver aberta.
+4. **Pedido aberto por outro usuário na ME22N.** A ME22N bloqueia o pedido para edição. O robô
+   classifica o bloqueio como `ERRO` ("bloqueado") se o SAP responder com mensagem de erro na barra
+   de status; se o SAP mostrar um popup perguntando se abre em modo de exibição, o comportamento
+   precisa ser validado com um pedido realmente bloqueado.
 5. Como o SAP exibe o título do anexo (com/sem extensão) — afeta a conferência de duplicidade.
+   Agora que a pasta vai inteira, isto importa mais: dois arquivos com o mesmo nome-base
+   (`COA.pdf` e `COA.xlsx`) só se distinguem se o SAP mostrar a extensão. Se mostrar só o nome-base
+   e o pedido tiver apenas um deles, o robô **não adivinha**: marca `ERRO` pedindo conferência manual
+   em vez de duplicar ou deixar de anexar.
+
+## Anexo na ME22N (fluxo)
+
+Com o pedido aberto na **ME22N**: *Serviços para objeto* → *Criar* → *Criar anexo* → janela **Abrir**
+(o robô cola o caminho do arquivo) → aviso **Segurança do SAP GUI** → **Permitir**. Repete para cada
+arquivo da pasta. A ME22N **bloqueia** o pedido aberto para os demais usuários; por isso o robô, ao
+trocar de pedido, solta o anterior e, ao terminar (inclusive com erro ou Ctrl+C), **sai da transação**
+(volta à tela inicial do SAP) para não deixar o último pedido preso.
 
 ## Estrutura
 
@@ -236,7 +347,10 @@ src/sap/pedidos.py         abrir pedido, listar anexos, anexar (única classe qu
 src/sap/dialogo_arquivo.py janela "Abrir" do Windows (pywinauto, em thread)
 src/sap/simulado.py        SAP de mentirinha p/ testes e --simulado
 scripts/gerar_base_ficticia.py · scripts/diagnostico_sap.py · scripts/verificar_planilha.py
-tests/                     122 testes (planilha e status, arquivos, processador, SapPedidos c/ sessão falsa, main ponta a ponta)
+src/arquivos/sharepoint_local.py  link do SharePoint → pasta sincronizada; base mais recente
+src/ambiente.py            resolve base e documentos reais (ou para com mensagem clara)
+src/utils/nomes.py         processo→pasta ('/'→'-'), conferência de anexos, normalização do critério
+tests/                     211 testes (base, arquivos, processador, SapPedidos c/ sessão falsa, main ponta a ponta)
 ```
 
 ## Próximos passos possíveis

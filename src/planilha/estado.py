@@ -37,6 +37,11 @@ class EstadoCsv:
         reg = self._dados.get(_chave(pedido, processo))
         return (reg.get("status", ""), reg.get("observacao", "")) if reg else None
 
+    def obter_registro(self, pedido: str, processo: str) -> dict[str, str] | None:
+        """Registro completo (status, data_processamento, observacao) ou None."""
+        reg = self._dados.get(_chave(pedido, processo))
+        return dict(reg) if reg else None
+
     def registrar(self, pedido: str, processo: str, status: str, observacao: str = "") -> None:
         self._dados[_chave(pedido, processo)] = {
             "pedido": pedido, "processo": processo, "status": status,

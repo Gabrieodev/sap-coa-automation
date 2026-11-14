@@ -37,6 +37,10 @@ class SapPreguicoso:
     def anexar(self, caminho: Path) -> None:
         self._sap().anexar(caminho)
 
+    def encerrar(self) -> None:
+        if self._real is not None:   # nunca conecta só para encerrar
+            self._real.encerrar()
+
     def limpar_popups(self) -> None:
         if self._real is not None:   # nunca conecta só para limpar tela
             self._real.limpar_popups()

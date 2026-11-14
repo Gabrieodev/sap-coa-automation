@@ -1,13 +1,13 @@
 """IDs de elementos do SAP GUI usados pelo robô.
 
 ATENÇÃO — VALIDAR NO SEU AMBIENTE. Estes IDs seguem o padrão que o gravador de scripts
-do SAP costuma gerar para a ME23N / Serviços para objeto (GOS), mas variam com versão do
+do SAP costuma gerar para a ME22N / Serviços para objeto (GOS), mas variam com versão do
 SAP GUI, tema e customizações. Para confirmar: no SAP, Alt+F12 > "Script Recording and
 Playback", grave o passo manual e compare. Se algo diferir, ajuste SÓ este arquivo.
 O script scripts/diagnostico_sap.py ajuda a conferir cada passo.
 """
 
-# --- Seleção do pedido (ME23N) ---
+# --- Seleção do pedido (ME22N) ---
 BTN_OUTRO_PEDIDO = "wnd[0]/tbar[1]/btn[17]"                                   # "Outro pedido" (Shift+F5)
 CAMPO_PEDIDO_DIALOGO = "wnd[1]/usr/subSUB0:SAPLMEGUI:0003/ctxtMEPO_SELECT-EBELN"
 
