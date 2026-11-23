@@ -176,10 +176,12 @@ def test_parse_intervalo_invalido():
 # ------------------------------------------------------------------ configuração
 def test_defaults_de_producao():
     c = cfg_mod.Config()
-    assert (c.col_processo, c.col_pedido) == ("G", "H")
-    assert c.gravar_status_na_planilha is True and c.col_status == "I"
-    assert c.col_obs is None and c.col_data is None
-    assert "ICLBRComexTeam" in c.sharepoint_url
+    assert (c.col_processo, c.col_pedido) == ("PROCESSO", "PEDIDO SAP")   # por nome, não por posição
+    # o robô preenche a cópia da base (colunas criadas pelo NOME no fim da tabela); CSV é a memória
+    assert c.gravar_status_na_planilha is True and c.col_status == "STATUS COA ROBÔ"
+    assert c.extensoes_permitidas == () and c.col_filtro is None
+    assert c.col_obs == "OBS COA ROBÔ" and c.col_data == "DATA COA ROBÔ"
+    assert "ICLBRComexTeam" in c.url_base_controle and c.planilha is None and c.raiz_arquivos is None
 
 
 def test_variaveis_de_ambiente_sobrescrevem(monkeypatch, tmp_path):

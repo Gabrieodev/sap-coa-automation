@@ -1,9 +1,14 @@
-"""Operações do robô sobre um pedido na ME23N: abrir, listar anexos, anexar.
+"""Operações do robô sobre um pedido na ME22N: abrir, listar anexos, anexar.
+
+Fluxo de anexo: com o pedido aberto na ME22N, Serviços para objeto > Criar > Criar anexo; o
+Windows abre "Abrir" (arquivo) e o SAP GUI pede confirmação ("Permitir") — ver dialogo_arquivo.py.
 
 É a ÚNICA classe que conhece telas e IDs do SAP. O restante do robô só enxerga estes
 quatro métodos, o que permite trocar por `SapSimulado` nos testes.
 """
 from __future__ import annotations
+
+import re
 
 import functools
 from pathlib import Path
@@ -49,7 +54,7 @@ def _classificar_erro_status(texto: str, pedido: str) -> Exception:
 
 class SapPedidos:
     def __init__(self, nav: SapNavigation, dialogo: DialogoArquivo,
-                 transacao: str = "ME23N", timeout: int = 30,
+                 transacao: str = "ME22N", timeout: int = 30,
                  coluna_titulo_anexos: str = "BITM_DESCR", log=None):
         self.nav = nav
         self.dialogo = dialogo
@@ -57,6 +62,7 @@ class SapPedidos:
         self.timeout = timeout
         self.coluna_titulo = coluna_titulo_anexos
         self.log = log
+        self._criar_anexo_itens = list(sel.GOS_CRIAR_ANEXO_ALTERNATIVAS)
 
     # ------------------------------------------------------------------ abrir
     @_traduzir_com_error
@@ -66,7 +72,7 @@ class SapPedidos:
             self.nav.abrir_transacao(self.transacao)
             self.nav.aguardar(self.timeout)
 
-        # a ME23N às vezes já abre o diálogo "Outro pedido" sozinha
+        # a ME22N às vezes já abre o diálogo "Outro pedido" sozinha
         if not self.nav.existe(sel.CAMPO_PEDIDO_DIALOGO):
             self.nav.obter(sel.BTN_OUTRO_PEDIDO).press()
             self.nav.aguardar(self.timeout)
@@ -87,25 +93,83 @@ class SapPedidos:
         """Títulos dos anexos do pedido aberto (como aparecem na lista do SAP)."""
         self.nav.clicar_menu_contexto(sel.GOS_BARRA, sel.GOS_MENU, sel.GOS_LISTA_ANEXOS)
         self.nav.aguardar(self.timeout)
-        if not self.nav.existe(sel.GRID_ANEXOS):
+        # ID conhecido primeiro; se não existir, procura a 1ª tabela da janela que abriu
+        grid = self.nav.obter(sel.GRID_ANEXOS) if self.nav.existe(sel.GRID_ANEXOS) \
+            else self.nav.achar_grid("wnd[1]/usr")
+        if grid is None:
+            if self.log:
+                aberta = self.nav.existe("wnd[1]")
+                self.log.warning("Lista de anexos: %s; considerando 'sem anexos'",
+                                 "a janela abriu mas não achei a tabela dentro dela" if aberta
+                                 else "nenhuma janela abriu")
             self.limpar_popups()
-            return []  # sem lista = sem anexos (VALIDAR no seu ambiente)
-        grid = self.nav.obter(sel.GRID_ANEXOS)
-        nomes = [str(grid.GetCellValue(i, self.coluna_titulo)) for i in range(int(grid.RowCount))]
+            return []
+        nomes = self._titulos_da_tabela(grid)
         self.limpar_popups()
         return nomes
+
+    def _titulos_da_tabela(self, grid) -> list[str]:
+        """Lê a coluna de títulos. Se o nome configurado não existir, procura a coluna certa pelo
+        cabeçalho (título/nome/descrição) ou usa a primeira, e registra o que achou."""
+        n = int(grid.RowCount)
+        try:
+            return [str(grid.GetCellValue(i, self.coluna_titulo)) for i in range(n)]
+        except Exception as primeiro_erro:
+            try:
+                colunas = [str(c) for c in _como_lista(grid.ColumnOrder)]
+                if not colunas:
+                    raise primeiro_erro
+                escolhida = colunas[0]
+                for c in colunas:
+                    cab = " ".join(str(t) for t in _como_lista(grid.GetColumnTitles(c)))
+                    if re.search(r"(?i)t[ií]tulo|title|nome|name|descri", cab):
+                        escolhida = c
+                        break
+                if self.log:
+                    self.log.info("Lista de anexos: coluna %r não existe; colunas da tabela=%s; usando %r "
+                                  "(ajuste coluna_titulo_anexos se for outra)", self.coluna_titulo,
+                                  colunas, escolhida)
+                return [str(grid.GetCellValue(i, escolhida)) for i in range(n)]
+            except Exception:
+                raise primeiro_erro
 
     @_traduzir_com_error
     def anexar(self, caminho: Path) -> None:
         # 1) a thread precisa estar de pé ANTES de abrir a janela (ver dialogo_arquivo.py)
         tarefa = self.dialogo.iniciar(caminho)
         # 2) Serviços para objeto > Criar > Criar anexo (bloqueia até a janela fechar)
-        self.nav.clicar_menu_contexto(sel.GOS_BARRA, sel.GOS_MENU, sel.GOS_CRIAR_ANEXO)
+        try:
+            usado = self.nav.clicar_menu_contexto_com_alternativas(
+                sel.GOS_BARRA, sel.GOS_MENU, self._criar_anexo_itens)
+        except Exception:
+            cancelar = getattr(tarefa, "cancelar", None)
+            if cancelar:
+                cancelar()
+            raise
+        if usado != self._criar_anexo_itens[0]:   # lembra o que funcionou: da próxima vez vai direto
+            if self.log:
+                self.log.info("'Criar anexo' acionado por %r (o 1º item da lista não funcionou)", usado)
+            self._criar_anexo_itens.remove(usado)
+            self._criar_anexo_itens.insert(0, usado)
         tarefa.aguardar(timeout=self.timeout)
         self.nav.aguardar(self.timeout)
         tipo, texto = self.nav.status_barra()
         if tipo in ("E", "A"):
             raise AnexoFalhouError(f"SAP recusou o anexo '{Path(caminho).name}': {texto}")
+
+    # ----------------------------------------------------------------- encerramento
+    def encerrar(self) -> None:
+        """A ME22N BLOQUEIA o pedido aberto para os demais usuários. Ao terminar, sai da transação
+        (tela inicial do SAP) para soltar o bloqueio do último pedido. Nunca derruba a execução."""
+        try:
+            self.limpar_popups()
+            if self.nav.transacao_atual() == self.transacao:
+                self.nav.abrir_transacao("SESSION_MANAGER")
+                self.nav.aguardar(self.timeout)
+        except Exception as e:
+            if self.log:
+                self.log.warning("Não consegui sair da %s ao terminar (o último pedido pode ficar "
+                                 "bloqueado até a sessão SAP fechar): %s", self.transacao, e)
 
     # ----------------------------------------------------------------- limpeza
     def limpar_popups(self, max_tentativas: int = 5) -> None:
@@ -119,3 +183,11 @@ class SapPedidos:
                 self.nav.aguardar(5)
             except Exception:
                 return
+
+
+def _como_lista(colecao) -> list:
+    """Coleção COM do SAP (Count/ElementAt) ou iterável comum -> lista."""
+    try:
+        return [colecao.ElementAt(i) for i in range(int(colecao.Count))]
+    except Exception:
+        return list(colecao)

@@ -1,7 +1,8 @@
 """Gera a base FICTÍCIA de demonstração:
-  data/controle_coa.xlsx          -> planilha no layout da base real: PROCESSO na coluna G,
-                                     PEDIDO SAP na H, STATUS na I (as demais o robô ignora)
-  data/sharepoint_simulado/...    -> pastas por processo, no lugar do SharePoint sincronizado
+  data/controle_coa.xlsx          -> "base do sistema" (só lida pelo robô): PROCESSO na coluna G,
+                                     PEDIDO SAP na H, SITUAÇÃO COA na I (critério opcional)
+  data/sharepoint_simulado/...    -> pastas por processo, no lugar do SharePoint sincronizado.
+                                     O processo da base é '0001/26'; a pasta é '0001-26'.
 
 Rodar de novo ZERA a demonstração (apaga e recria). Cada linha cobre um cenário diferente,
 combinando com os cenários do SAP simulado em main.py (--simulado).
@@ -50,49 +51,55 @@ def criar_pastas():
     if SP.exists():
         shutil.rmtree(SP)
     SP.mkdir(parents=True)
-    # 0001: 2 PDFs + lixo que o robô deve ignorar (temporário do Office, Thumbs.db, .txt)
-    p = SP / "PROC-2026-0001"
-    coa(p, "COA_PROC-2026-0001_lote1.pdf")
-    coa(p, "COA_PROC-2026-0001_lote2.pdf")
-    (p / "~$COA_PROC-2026-0001_lote1.pdf").write_bytes(b"lixo")
+    # 0001/26: o robô anexa TUDO da pasta (PDFs, Excel, txt), menos lixo (~$, Thumbs.db)
+    p = SP / "0001-26"
+    coa(p, "COA_0001-26_lote1.pdf")
+    coa(p, "COA_0001-26_lote2.pdf")
+    (p / "packing list.xlsx").write_bytes("PK ficticio: planilha de packing list".encode("utf-8"))
+    (p / "notas internas.txt").write_text("também é anexado (pasta inteira)", encoding="utf-8")
+    (p / "~$COA_0001-26_lote1.pdf").write_bytes(b"lixo")
     (p / "Thumbs.db").write_bytes(b"lixo")
-    (p / "notas internas.txt").write_text("não é para anexar", encoding="utf-8")
-    # 0002: 1 PDF
-    coa(SP / "PROC-2026-0002", "COA_PROC-2026-0002.pdf")
-    # 0003: lote1 já estará anexado no SAP simulado (testa idempotência); lote2 é novo
-    coa(SP / "PROC-2026-0003", "COA_PROC-2026-0003_lote1.pdf")
-    coa(SP / "PROC-2026-0003", "COA_PROC-2026-0003_lote2.pdf")
-    # 0004: SEM pasta (cenário "pasta não encontrada")
-    # 0005: pasta existe mas sem PDF (cenário "sem arquivos")
-    (SP / "PROC-2026-0005").mkdir()
-    (SP / "PROC-2026-0005" / "rascunho.txt").write_text("sem pdf", encoding="utf-8")
-    # 0006 / 0007: pasta OK; o problema é no SAP (pedido inexistente / bloqueado)
-    coa(SP / "PROC-2026-0006", "COA_PROC-2026-0006.pdf")
-    coa(SP / "PROC-2026-0007", "COA_PROC-2026-0007.pdf")
-    # 0008: nome da pasta com sufixo (o robô casa pelo início do nome)
-    coa(SP / "PROC-2026-0008 - Fornecedor Alfa", "COA_PROC-2026-0008.pdf")
-    # 0011: DUAS pastas casam -> ambíguo
-    coa(SP / "PROC-2026-0011 - Fornecedor A", "COA_PROC-2026-0011_a.pdf")
-    coa(SP / "PROC-2026-0011 - Fornecedor B", "COA_PROC-2026-0011_b.pdf")
-    # 0010 já está CONCLUIDO na planilha; pasta existe, mas não deve ser tocada
-    coa(SP / "PROC-2026-0010", "COA_PROC-2026-0010.pdf")
+    # 0002/26: 1 PDF
+    coa(SP / "0002-26", "COA_0002-26.pdf")
+    # 0003/26: lote1 já estará anexado no SAP simulado (testa idempotência); lote2 é novo
+    coa(SP / "0003-26", "COA_0003-26_lote1.pdf")
+    coa(SP / "0003-26", "COA_0003-26_lote2.pdf")
+    # 0004/26: SEM pasta (cenário "pasta não encontrada")
+    # 0005/26: pasta existe mas só tem lixo (cenário "sem arquivos")
+    (SP / "0005-26").mkdir()
+    (SP / "0005-26" / "Thumbs.db").write_bytes(b"lixo")
+    # 0006/26 / 0007/26: pasta OK; o problema é no SAP (pedido inexistente / bloqueado)
+    coa(SP / "0006-26", "COA_0006-26.pdf")
+    coa(SP / "0007-26", "COA_0007-26.pdf")
+    # 0008/26: pasta com sufixo (plano B: o robô casa pelo início do nome)
+    coa(SP / "0008-26 (ANTIGO 1-9145)", "COA_0008-26.pdf")
+    # 0011/26: DUAS pastas casam -> ambíguo
+    coa(SP / "0011-26 - Fornecedor A", "COA_0011-26_a.pdf")
+    coa(SP / "0011-26 - Fornecedor B", "COA_0011-26_b.pdf")
+    # 0010/26 e 0012/26 ficam fora do critério da base; as pastas existem mas não são tocadas
+    coa(SP / "0010-26", "COA_0010-26.pdf")
+    coa(SP / "0012-26", "COA_0012-26.pdf")
+    # Processos que NÃO estão na base: o robô nem olha estas pastas
+    for fora in ("0090-26", "0091-26", "0092-26"):
+        coa(SP / fora, f"COA_{fora}.pdf")
 
 
-# (processo, pedido, status inicial) — colunas da planilha: G=processo, H=pedido, I=status
+# (processo, pedido, situação COA) — colunas da planilha: G=processo, H=pedido, I=situação
+# "PENDENTE" = precisa anexar. Com COA_COL_FILTRO=I e COA_FILTRO_PROCESSAR=PENDENTE só estas valem.
 LINHAS = [
-    ("PROC-2026-0001", "4500001001", None),   # ok, 2 arquivos (+ lixo ignorado)
-    ("PROC-2026-0002", 4500001002, None),     # ok; pedido numérico na célula
-    ("PROC-2026-0003", "4500001003", None),   # 1 já anexado -> envia só o lote2
-    ("PROC-2026-0004", "4500001004", None),   # pasta inexistente -> ERRO
-    ("PROC-2026-0005", "4500001005", None),   # pasta sem PDF -> ERRO
-    ("PROC-2026-0006", "4500001006", None),   # pedido inexistente no SAP -> ERRO
-    ("PROC-2026-0007", "4500001007", None),   # pedido bloqueado -> ERRO
-    ("PROC-2026-0008", "4500001008", None),   # pasta com sufixo -> ok
-    (None, "4500001009", None),               # processo vazio -> ERRO de validação
-    ("PROC-2026-0001", "4500001001", None),   # duplicata exata -> IGNORADO
-    ("PROC-2026-0010", "4500001010", "JÁ ANEXADO"),  # já anexado -> pulado
-    ("PROC-2026-0011", "4500001011", None),   # duas pastas casam -> ERRO ambíguo
-    ("PROC-2026-0012", "4500001012", "AGUARDANDO FORNECEDOR"),  # texto manual -> pulado, intocado
+    ("0001/26", "4500001001", "PENDENTE"),   # ok: 3 arquivos (+ lixo ignorado)
+    ("0002/26", 4500001002, "PENDENTE"),     # ok; pedido numérico na célula
+    ("0003/26", "4500001003", "PENDENTE"),   # 1 já anexado -> envia só o lote2
+    ("0004/26", "4500001004", "PENDENTE"),   # pasta inexistente -> ERRO
+    ("0005/26", "4500001005", "PENDENTE"),   # pasta só com lixo -> ERRO
+    ("0006/26", "4500001006", "PENDENTE"),   # pedido inexistente no SAP -> ERRO
+    ("0007/26", "4500001007", "PENDENTE"),   # pedido bloqueado -> ERRO
+    ("0008/26", "4500001008", "PENDENTE"),   # pasta com sufixo -> ok
+    (None, "4500001009", "PENDENTE"),        # processo vazio -> ERRO de validação
+    ("0001/26", "4500001001", "PENDENTE"),   # duplicata exata -> IGNORADO
+    ("0010/26", "4500001010", "COA ANEXADO"),            # fora do critério -> não é tocada
+    ("0011/26", "4500001011", "PENDENTE"),   # duas pastas casam -> ERRO ambíguo
+    ("0012/26", "4500001012", "SEM COA NECESSÁRIO"),     # fora do critério -> não é tocada
 ]
 
 FORNECEDORES = ["Alfa Químicos", "Beta Insumos", "Gama Trading", "Delta Química"]
@@ -104,18 +111,18 @@ def criar_planilha():
     ws = wb.active
     ws.title = "Base de dados COA"
     cab = ["DATA", "FORNECEDOR", "PRODUTO", "NF", "INVOICE", "LOTE",
-           "PROCESSO", "PEDIDO SAP", "STATUS", "OBS. EQUIPE"]
+           "PROCESSO", "PEDIDO SAP", "SITUAÇÃO COA", "OBS. EQUIPE"]
     ws.append(cab)
     fonte = Font(name="Arial", size=10)
     for c in ws[1]:
         c.font = Font(name="Arial", size=10, bold=True, color="FFFFFF")
         c.fill = PatternFill("solid", fgColor="1F4E78")
         c.alignment = Alignment(horizontal="center")
-    for i, (proc, ped, status) in enumerate(LINHAS):
-        # colunas A-F e J são "ruído" de propósito: o robô só lê G e H e só ESCREVE na I
+    for i, (proc, ped, situacao) in enumerate(LINHAS):
+        # colunas A-F e J são "ruído" de propósito: o robô só lê G e H (e I, se o filtro estiver ligado)
         ws.append([f"2026-09-{(i % 28) + 1:02d}", FORNECEDORES[i % 4], PRODUTOS[i % 4],
                    f"NF-{9000 + i}", f"INV-{300 + i}", f"L{i + 1:03d}", proc, ped,
-                   status, "fictício" if i % 3 == 0 else None])
+                   situacao, "fictício" if i % 3 == 0 else None])
     for row in ws.iter_rows(min_row=2):
         for c in row:
             c.font = fonte
@@ -129,27 +136,28 @@ def criar_planilha():
         ("BASE FICTÍCIA DE DEMONSTRAÇÃO (layout da base real)", True),
         ("Pedidos, processos e fornecedores são inventados.", False),
         ("", False),
-        ("Como o robô usa as colunas", True),
-        ("G  PROCESSO    : nome (ou início do nome) da pasta do processo no SharePoint. (lida)", False),
-        ("H  PEDIDO SAP  : número do pedido de compra no SAP. (lida)", False),
-        ("I  STATUS      : em BRANCO = o robô anexa; o robô escreve 'JÁ ANEXADO' ou 'ERRO'. (escrita)", False),
-        ("                 Qualquer outro texto digitado (ex.: 'AGUARDANDO FORNECEDOR') = linha pulada.", False),
-        ("As demais colunas são ignoradas e não são alteradas.", False),
+        ("Como o robô usa as colunas (a memória dele fica em data\\estado_processamento.csv)", True),
+        ("G  PROCESSO     : '0001/26' na base = pasta '0001-26' no SharePoint. (lida)", False),
+        ("H  PEDIDO SAP   : número do pedido de compra no SAP. (lida)", False),
+        ("I  SITUAÇÃO COA : critério opcional. Para ligar: COA_COL_FILTRO=I e COA_FILTRO_PROCESSAR=PENDENTE.", False),
+        ("K-M STATUS/OBS/DATA COA ROBÔ : o robô cria e preenche estas colunas no fim da tabela. (escrita)", False),
+        ("As demais colunas não são alteradas. O robô só visita as pastas dos processos que estão aqui;", False),
+        ("as pastas 0090-26, 0091-26 e 0092-26 do SharePoint simulado NÃO estão na base e nunca são abertas.", False),
         ("", False),
         ("Cenários cobertos pelas linhas de exemplo", True),
-        ("Linha 2: ok, 2 PDFs (a pasta também tem lixo que deve ser ignorado)", False),
+        ("Linha 2: ok, 3 arquivos (PDFs + Excel + txt); lixo (~$, Thumbs.db) é ignorado", False),
         ("Linha 3: pedido numérico na célula", False),
         ("Linha 4: 1 PDF já anexado no SAP -> envia só o que falta", False),
         ("Linha 5: pasta do processo não existe", False),
-        ("Linha 6: pasta sem PDF", False),
+        ("Linha 6: pasta só com lixo (sem nada para anexar)", False),
         ("Linha 7: pedido inexistente no SAP", False),
         ("Linha 8: pedido bloqueado no SAP", False),
-        ("Linha 9: pasta com sufixo no nome ('PROC-2026-0008 - Fornecedor Alfa')", False),
+        ("Linha 9: pasta com sufixo no nome ('0008-26 (ANTIGO 1-9145)')", False),
         ("Linha 10: processo vazio", False),
         ("Linha 11: duplicata exata da linha 2", False),
-        ("Linha 12: já marcada 'JÁ ANEXADO' -> pulada", False),
+        ("Linha 12: situação 'COA ANEXADO' -> fora do critério (com o filtro ligado)", False),
         ("Linha 13: duas pastas casam com o processo -> ambíguo", False),
-        ("Linha 14: texto manual no status -> pulada e preservada", False),
+        ("Linha 14: situação 'SEM COA NECESSÁRIO' -> fora do critério (com o filtro ligado)", False),
     ]
     for i, (t, neg) in enumerate(linhas, 1):
         c = leg.cell(i, 1, t)

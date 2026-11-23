@@ -46,3 +46,10 @@ def montar(tmp_path, cfg, log):
         return (PlanilhaControle(cfg.planilha, log=log),
                 PastaSincronizada(cfg.raiz_arquivos, cfg.extensoes_permitidas, log=log))
     return _montar
+
+
+@pytest.fixture(autouse=True)
+def _permitir_simulado_na_base(monkeypatch):
+    """Os testes usam --simulado com bases temporárias; a trava que protege a base real fica
+    desligada aqui (e é testada à parte, removendo esta variável)."""
+    monkeypatch.setenv("COA_PERMITIR_SIMULADO_NA_BASE", "1")

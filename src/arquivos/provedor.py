@@ -14,6 +14,7 @@ from pathlib import Path
 
 from src.erros import (ArquivoIndisponivelError, PastaProcessoAmbiguaError,
                        PastaProcessoNaoEncontradaError, SemArquivosError)
+from src.utils.nomes import nome_pasta_processo, nomes_pasta_candidatos
 
 _IGNORAR_NOMES = {"thumbs.db", "desktop.ini", ".ds_store"}
 
@@ -36,75 +37,112 @@ def _chave(texto: str) -> str:
 
 
 class PastaSincronizada(ProvedorArquivos):
-    def __init__(self, raiz: Path, extensoes: tuple[str, ...] = (".pdf",),
-                 timeout_download: int = 60, log=None, profundidade: int = 1):
-        """profundidade=1: as pastas de processo ficam direto na raiz. 2: dentro de uma
-        subpasta da raiz (ex.: por ano), e assim por diante."""
+    """Lê as pastas de processo da biblioteca do SharePoint sincronizada pelo OneDrive.
+
+    O robô só olha os processos que estão na base: para cada um, vai DIRETO na pasta
+    `<raiz>/<processo com '/' trocado por '-'>`. O restante do SharePoint nunca é percorrido.
+    A listagem de uma pasta inteira só acontece como plano B (pasta com sufixo no nome, ex.:
+    '0002-23 (ANTIGO 1-9145)'), uma vez por pasta-base e apenas se algum processo não tiver
+    pasta com o nome exato.
+    """
+
+    def __init__(self, raiz: Path, extensoes: tuple[str, ...] = (),
+                 timeout_download: int = 60, log=None, profundidade: int = 1,
+                 buscar_por_prefixo: bool = True):
+        """extensoes: () = anexa tudo que estiver na pasta; ex.: ('.pdf',) restringe.
+        profundidade=1: as pastas de processo ficam direto na raiz. 2: dentro de uma subpasta
+        da raiz (ex.: por ano), e assim por diante.
+        buscar_por_prefixo=False: só aceita pasta com nome exato (nunca lista a raiz)."""
         self.raiz = Path(raiz)
         self.profundidade = max(int(profundidade), 1)
-        self._cache_pastas: list[Path] | None = None
-        self.extensoes = tuple(e.lower() for e in extensoes)
+        self.buscar_por_prefixo = buscar_por_prefixo
+        self.extensoes = tuple(("." + e.lstrip(".")).lower() for e in extensoes if e.strip("."))
         self.timeout_download = timeout_download
         self.log = log
+        self._bases_cache: list[Path] | None = None
+        self._listagens: dict[Path, list[Path]] = {}
+        self.listagens = 0          # quantas pastas foram listadas (métrica/teste: deve ser ~0)
 
-    def _listar_pastas(self) -> list[Path]:
-        """Pastas candidatas até `profundidade` níveis. Listadas uma vez por execução."""
-        if self._cache_pastas is None:
-            achadas, nivel = [], [self.raiz]
-            for _ in range(self.profundidade):
-                proximo = []
-                for base in nivel:
-                    try:
-                        filhos = [p for p in base.iterdir() if p.is_dir()]
-                    except OSError:
-                        continue
-                    achadas.extend(filhos)
-                    proximo.extend(filhos)
-                nivel = proximo
-            self._cache_pastas = achadas
-        return self._cache_pastas
+    # ------------------------------------------------------------------ localizar
+    def _listar_subpastas(self, base: Path) -> list[Path]:
+        """Lista as subpastas de `base` (1 listagem por pasta, em cache)."""
+        if base not in self._listagens:
+            self.listagens += 1
+            try:
+                with os.scandir(base) as it:
+                    self._listagens[base] = [Path(e.path) for e in it if e.is_dir()]
+            except OSError:
+                self._listagens[base] = []
+        return self._listagens[base]
+
+    def _bases(self) -> list[Path]:
+        """Pastas que PODEM conter pastas de processo: a raiz e, se profundidade>1, as
+        subpastas intermediárias (ex.: anos). Nunca desce até as pastas de processo."""
+        if self._bases_cache is None:
+            bases, nivel = [self.raiz], [self.raiz]
+            for _ in range(self.profundidade - 1):
+                nivel = [sub for b in nivel for sub in self._listar_subpastas(b)]
+                bases.extend(nivel)
+            self._bases_cache = bases
+        return self._bases_cache
+
+    def _rel(self, p: Path) -> str:
+        return str(p.relative_to(self.raiz))
 
     def localizar_pasta(self, processo: str) -> Path:
         if not self.raiz.exists():
             raise PastaProcessoNaoEncontradaError(
                 f"Pasta raiz de arquivos inacessível: {self.raiz} (OneDrive sincronizado?)")
-        subpastas = self._listar_pastas()
-        alvo = _chave(processo)
+        nome = nome_pasta_processo(processo)
+        bases = self._bases()
 
-        exatas = [p for p in subpastas if _chave(p.name) == alvo]
+        # 1) acesso direto ('0226-25' ou '0226_25'): uma checagem por base, sem listar nada
+        exatas = [b / n for b in bases for n in nomes_pasta_candidatos(processo) if (b / n).is_dir()]
         if len(exatas) == 1:
             return exatas[0]
-
-        # "PROC-2026-0008 - Fornecedor X": o nome começa com o número do processo,
-        # seguido de separador (evita 'PROC-1' casar com 'PROC-10')
-        padrao = re.compile(rf"^{re.escape(alvo)}(?![0-9a-z])")
-        parciais = [p for p in subpastas if padrao.match(_chave(p.name))]
-        candidatas = exatas or parciais
-        if len(candidatas) == 1:
-            return candidatas[0]
-        if len(candidatas) > 1:
+        if len(exatas) > 1:
             raise PastaProcessoAmbiguaError(
-                f"{len(candidatas)} pastas casam com '{processo}': "
-                f"{[str(p.relative_to(self.raiz)) for p in candidatas]}")
-        raise PastaProcessoNaoEncontradaError(f"Nenhuma pasta para o processo '{processo}'")
+                f"{len(exatas)} pastas casam com '{processo}': {[self._rel(p) for p in exatas]}")
+
+        # 2) plano B: pasta com sufixo / caixa diferente. Só aqui há listagem.
+        if self.buscar_por_prefixo:
+            alvo = _chave(processo)
+            # "PROC-2026-0008 - Fornecedor X": o nome começa com o número do processo, seguido
+            # de separador (evita 'PROC-1' casar com 'PROC-10')
+            padrao = re.compile(rf"^{re.escape(alvo)}(?![0-9a-z])")
+            todas = [p for b in bases for p in self._listar_subpastas(b)]
+            iguais = [p for p in todas if _chave(p.name) == alvo]
+            candidatas = iguais or [p for p in todas if padrao.match(_chave(p.name))]
+            if len(candidatas) == 1:
+                return candidatas[0]
+            if len(candidatas) > 1:
+                raise PastaProcessoAmbiguaError(
+                    f"{len(candidatas)} pastas casam com '{processo}': "
+                    f"{[self._rel(p) for p in candidatas]}")
+        raise PastaProcessoNaoEncontradaError(
+            f"Nenhuma pasta para o processo '{processo}' (procurei '{nome}')")
+
+    # ------------------------------------------------------------------ arquivos
+    def _elegivel(self, f: Path) -> bool:
+        nome = f.name.lower()
+        if nome.startswith("~$") or nome.startswith(".") or nome in _IGNORAR_NOMES:
+            return False  # lixo do sistema/Office: nunca é conteúdo do processo
+        if nome.endswith((".tmp", ".crdownload", ".partial")):
+            return False
+        return not self.extensoes or f.suffix.lower() in self.extensoes
 
     def obter_arquivos(self, processo: str) -> list[Path]:
+        """Todos os arquivos da pasta do processo (não só o COA), exceto lixo/temporários."""
         pasta = self.localizar_pasta(processo)
-        elegiveis = []
-        for f in sorted(pasta.iterdir()):
-            if not f.is_file():
-                continue
-            nome = f.name.lower()
-            if nome.startswith("~$") or nome.startswith(".") or nome in _IGNORAR_NOMES:
-                continue
-            if nome.endswith((".tmp", ".crdownload", ".partial")):
-                continue
-            if f.suffix.lower() not in self.extensoes:
-                continue
-            elegiveis.append(f)
+        entradas = sorted(pasta.iterdir())
+        subpastas = [e.name for e in entradas if e.is_dir()]
+        if subpastas and self.log:
+            self.log.warning("  pasta '%s' tem subpastas que NÃO serão anexadas: %s",
+                             pasta.name, subpastas)
+        elegiveis = [f for f in entradas if f.is_file() and self._elegivel(f)]
         if not elegiveis:
-            raise SemArquivosError(
-                f"Pasta '{pasta.name}' sem arquivos {self.extensoes} para anexar")
+            filtro = f" {self.extensoes}" if self.extensoes else ""
+            raise SemArquivosError(f"Pasta '{pasta.name}' sem arquivos{filtro} para anexar")
         for f in elegiveis:
             self._garantir_local(f)
         return elegiveis

@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import config as cfg_mod
 from src.sap import seletores as sel
 from src.sap.dialogo_arquivo import DialogoArquivo
+from src.sap import teclado
 from src.sap.navegacao import SapNavigation
 from src.sap.pedidos import SapPedidos
 
@@ -32,10 +33,12 @@ def main():
     pedido = sys.argv[1]
     cfg = cfg_mod.carregar()
 
-    nav = passo("Conectar ao SAP e obter sessão", SapNavigation)
+    nav = passo("Conectar ao SAP e obter sessão",
+                lambda: SapNavigation(fechar_menu=teclado.esc, enviar_teclas=teclado.enviar))
     if not nav:
         return
-    sap = SapPedidos(nav, DialogoArquivo(), cfg.transacao, cfg.timeout_sap, cfg.coluna_titulo_anexos)
+    dialogo = DialogoArquivo(cfg.timeout_dialogo_arquivo, espera_seguranca=cfg.espera_janela_seguranca)
+    sap = SapPedidos(nav, dialogo, cfg.transacao, cfg.timeout_sap, cfg.coluna_titulo_anexos)
 
     passo(f"Abrir pedido {pedido} na {cfg.transacao}", lambda: sap.abrir_pedido(pedido))
     passo("Barra de status", nav.status_barra)

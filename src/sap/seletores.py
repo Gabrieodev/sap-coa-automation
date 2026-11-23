@@ -1,13 +1,13 @@
 """IDs de elementos do SAP GUI usados pelo robô.
 
 ATENÇÃO — VALIDAR NO SEU AMBIENTE. Estes IDs seguem o padrão que o gravador de scripts
-do SAP costuma gerar para a ME23N / Serviços para objeto (GOS), mas variam com versão do
+do SAP costuma gerar para a ME22N / Serviços para objeto (GOS), mas variam com versão do
 SAP GUI, tema e customizações. Para confirmar: no SAP, Alt+F12 > "Script Recording and
 Playback", grave o passo manual e compare. Se algo diferir, ajuste SÓ este arquivo.
 O script scripts/diagnostico_sap.py ajuda a conferir cada passo.
 """
 
-# --- Seleção do pedido (ME23N) ---
+# --- Seleção do pedido (ME22N) ---
 BTN_OUTRO_PEDIDO = "wnd[0]/tbar[1]/btn[17]"                                   # "Outro pedido" (Shift+F5)
 CAMPO_PEDIDO_DIALOGO = "wnd[1]/usr/subSUB0:SAPLMEGUI:0003/ctxtMEPO_SELECT-EBELN"
 
@@ -15,6 +15,12 @@ CAMPO_PEDIDO_DIALOGO = "wnd[1]/usr/subSUB0:SAPLMEGUI:0003/ctxtMEPO_SELECT-EBELN"
 GOS_BARRA = "wnd[0]/titl/shellcont/shell"
 GOS_MENU = "%GOS_TOOLBOX"
 GOS_CRIAR_ANEXO = "%GOS_PCATTA_CREATE"      # Criar > Criar anexo
+# Se o código acima não existir nesta versão do SAP GUI ("The method got an invalid argument"), o robô
+# tenta as próximas; itens sem '%' são o TEXTO exibido no menu. Coloque aqui o que o gravador mostrar.
+# Menu real (print do SAP): Serviços para objeto > "Criar..." > "Criar anexo". Formas tentadas, em ordem:
+# código de função, texto, texto com submenu, posição ("pos:") e, por último, teclado ("teclado:").
+GOS_CRIAR_ANEXO_ALTERNATIVAS = (GOS_CRIAR_ANEXO, "Criar anexo", "Criar...|Criar anexo",
+                                "pos:0|0", "teclado:c{ENTER}")
 GOS_LISTA_ANEXOS = "%GOS_VIEW_ATTA"         # Lista de anexos
 
 # --- Lista de anexos (popup) --- PLACEHOLDER: confirmar com o gravador/diagnóstico

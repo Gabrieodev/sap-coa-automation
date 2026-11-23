@@ -225,14 +225,16 @@ def test_segunda_execucao_nao_refaz_o_que_ja_esta_anexado(cfg, log):
     assert r.resultados == [] and sap2.chamadas == []
 
 
-# ------------------------------------------------------------------ main ponta a ponta (modo padrão)
+# ------------------------------------------------------------------ main ponta a ponta (modo coluna na planilha)
+# Coluna de status por LETRA (I): estes testes usam o layout antigo de 10 colunas.
 def test_main_grava_status_na_coluna_I_e_respeita_o_que_e_texto_manual(tmp_path, monkeypatch):
     p = base(tmp_path / "base.xlsx", [("PROC-A", "4500002001", None), ("PROC-B", "4500002002", "SEM COA"),
                                       ("PROC-C", "4500002003", "JÁ ANEXADO"), ("PROC-D", "4500002004", None)])
     for proc in ("PROC-A", "PROC-B", "PROC-C"):
         criar_pdf(tmp_path / "sp" / proc, "coa.pdf")       # PROC-D: sem pasta -> ERRO
     for k, v in {"COA_PLANILHA": p, "COA_RAIZ_ARQUIVOS": tmp_path / "sp", "COA_LOGS_DIR": tmp_path / "logs",
-                 "COA_COL_OBS": "J"}.items():
+                 "COA_COL_OBS": "J", "COA_COL_STATUS": "I", "COA_COL_DATA": "",
+                 "COA_ARQUIVO_ESTADO": tmp_path / "estado.csv"}.items():
         monkeypatch.setenv(k, str(v))
     monkeypatch.setattr(sys, "argv", ["main.py", "--simulado"])
     assert main_mod.main() == 1                              # 1 = houve item com erro
@@ -241,14 +243,15 @@ def test_main_grava_status_na_coluna_I_e_respeita_o_que_e_texto_manual(tmp_path,
     assert "Nenhuma pasta" in r[3][9]                       # motivo do erro na coluna J
     assert r[1][9] == "nota"                                 # linha pulada: coluna J intocada
     assert list((tmp_path / "logs" / "backup_planilha").glob("base_*.xlsx"))
-    assert not (tmp_path / "estado_processamento.csv").exists()
+    assert (tmp_path / "estado.csv").exists()                # memória do robô gravada junto
     monkeypatch.setattr(sys, "argv", ["main.py", "--simulado", "--dry-run"])
     assert main_mod.main() == 0                              # nada novo a processar
 
 
 def test_main_sem_titulo_na_coluna_de_status_sai_com_2(tmp_path, monkeypatch):
     p = base(tmp_path / "base.xlsx", [("PROC-A", "4500002001", None)], cab=CAB[:8] + [None] + CAB[9:])
-    for k, v in {"COA_PLANILHA": p, "COA_RAIZ_ARQUIVOS": tmp_path / "sp", "COA_LOGS_DIR": tmp_path / "logs"}.items():
+    for k, v in {"COA_PLANILHA": p, "COA_RAIZ_ARQUIVOS": tmp_path / "sp", "COA_LOGS_DIR": tmp_path / "logs",
+                 "COA_COL_STATUS": "I", "COA_ARQUIVO_ESTADO": tmp_path / "estado.csv"}.items():
         monkeypatch.setenv(k, str(v))
     monkeypatch.setattr(sys, "argv", ["main.py", "--simulado"])
     assert main_mod.main() == 2

@@ -113,7 +113,8 @@ def ambiente_main(tmp_path, monkeypatch):
     monkeypatch.setattr(main_mod, "_conectar_sap_real", lambda cfg, log: (_ for _ in ()).throw(
         AssertionError("conectou ao SAP real durante o teste")))
     for k, v in {"COA_RAIZ_ARQUIVOS": tmp_path / "sp", "COA_LOGS_DIR": tmp_path / "logs",
-                 "COA_PLANILHA": tmp_path / "base.xlsx"}.items():
+                 "COA_PLANILHA": tmp_path / "base.xlsx",
+                 "COA_COL_STATUS": "I", "COA_ARQUIVO_ESTADO": tmp_path / "estado.csv"}.items():  # coluna I = status
         monkeypatch.setenv(k, str(v))
     monkeypatch.setattr(sys, "argv", ["main.py"])           # modo REAL (sem --simulado)
     return tmp_path
