@@ -17,6 +17,14 @@ class com_error(Exception):  # o nome da classe é o que o código procura
     pass
 
 
+@pytest.fixture(autouse=True)
+def _arquivos_de_teste(tmp_path, monkeypatch):
+    """`anexar` confere se o arquivo existe e é legível; os testes usam arquivos pequenos de verdade."""
+    for nome in ("COA.pdf", "COA2.pdf", "x.pdf"):
+        (tmp_path / nome).write_bytes(b"%PDF-1.4 teste")
+    monkeypatch.chdir(tmp_path)
+
+
 class El:
     def __init__(self, sessao, id_):
         self.s, self.id = sessao, id_
@@ -32,6 +40,8 @@ class El:
 
     def sendVKey(self, k):
         self.s.eventos.append(("vkey", self.id, k))
+        if self.id == "wnd[0]" and self.s.el("wnd[0]/tbar[0]/okcd").text == "/n":
+            self.s.transacao = "SESSION_MANAGER"      # /n + Enter volta à tela inicial do SAP
         if self.id == "wnd[1]" and self.s.dialogo_pedido:
             campo = self.s.el(sel.CAMPO_PEDIDO_DIALOGO).text
             msg = self.s.mensagens.get(campo)
@@ -194,7 +204,7 @@ def test_listar_anexos_sem_grid_devolve_vazio(s, sap):
 
 
 def test_anexar_inicia_o_dialogo_ANTES_de_acionar_o_menu(s, sap):
-    sap.anexar(Path("/tmp/COA.pdf"))
+    sap.anexar(Path("COA.pdf"))
     ordem = [e[0] for e in s.eventos if e[0] in ("dialogo.iniciar", "ctx_item")]
     assert ordem == ["dialogo.iniciar", "ctx_item"]
     assert ("ctx_item", sel.GOS_CRIAR_ANEXO) in s.eventos
@@ -249,12 +259,13 @@ def test_encerrar_sai_da_transacao_para_soltar_o_bloqueio(s, sap):
     sap.abrir_pedido("4500001001")
     assert s.transacao == "ME22N"
     sap.encerrar()
-    assert s.transacao == "SESSION_MANAGER" and ("start", "SESSION_MANAGER") in s.eventos
+    assert s.el("wnd[0]/tbar[0]/okcd").text == "/n" and ("vkey", "wnd[0]", 0) in s.eventos
+    assert s.transacao == "SESSION_MANAGER"
 
 
 def test_encerrar_sem_ter_aberto_nada_nao_faz_nada(s, sap):
     sap.encerrar()
-    assert ("start", "SESSION_MANAGER") not in s.eventos
+    assert not [e for e in s.eventos if e[0] == "vkey"]        # nada digitado: nunca abriu pedido
 
 
 def test_encerrar_nunca_levanta_mesmo_com_sessao_morta(s, sap):

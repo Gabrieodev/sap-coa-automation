@@ -66,7 +66,7 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements-dev.txt
 
-python -m pytest                      :: 226 testes, rodam sem SAP
+python -m pytest                      :: 235 testes, rodam sem SAP
 python scripts\gerar_base_ficticia.py :: (re)cria base e pastas de demonstração
 python main.py --simulado             :: roda tudo contra um SAP de mentirinha
 python main.py --simulado --dry-run   :: idem, sem gravar nada (nem na base, nem no CSV)
@@ -343,6 +343,34 @@ arquivo da pasta. A ME22N **bloqueia** o pedido aberto para os demais usuários;
 trocar de pedido, solta o anterior e, ao terminar (inclusive com erro ou Ctrl+C), **sai da transação**
 (volta à tela inicial do SAP) para não deixar o último pedido preso.
 
+### Aviso "Segurança do SAP GUI" (Permitir)
+
+Para cada arquivo, o SAP GUI pergunta se **permite** o acesso ao arquivo local. O robô clica em
+**Permitir** sozinho, numa **thread própria** (`DialogoArquivo._vigiar_seguranca`): ao confirmar o
+"Importar file", a chamada de scripting do SAP fica **bloqueada até alguém clicar** em Permitir; se o
+clique dependesse da mesma thread, o robô esperaria para sempre. O aviso é achado pelo título OU por ter o
+botão "Permitir" (ou "Allow"). Se o clique falhar, o log mostra **quais janelas de diálogo estavam
+visíveis** (título, classe e botões) para ajustar `TITULO_SEGURANCA_RE`/`BOTAO_PERMITIR_RE`.
+
+Requisitos: o robô precisa rodar **com o mesmo nível de permissão do SAP GUI** (se o SAP GUI estiver
+"Executar como administrador" e o Python não, o Windows impede o clique), e a sessão do Windows precisa
+estar **desbloqueada**.
+
+**Alternativa sem clique (configuração do SAP GUI).** Em *Opções do SAP GUI → Segurança → Configuração de
+segurança* dá para criar uma **regra** que permite leitura só na pasta dos documentos
+(`...\DOCS PROCESSOS IMPORTAÇÃO`), em vez de "Perguntar". Os nomes dos menus variam com a versão do SAP GUI,
+e a configuração costuma ser **gerenciada pela TI**: peça a eles. Evite "Permitir tudo": limite à pasta.
+A caixa "Lembrar minha decisão", quando existe no aviso, pode criar essa regra por arquivo.
+
+### Conferência final do anexo
+
+Depois de anexar, o robô relê a "Lista de anexos" para conferir. Se a **tabela não puder ser lida**, o
+resultado `[]` não significa "sem anexos": o robô registra um aviso e marca **concluído** (o SAP aceitou os
+anexos sem erro), com a nota `[sem conferência: tabela de anexos ilegível]` na observação. Se a tabela foi
+lida e o arquivo não está nela, continua sendo `ERRO`. Se os títulos não batem com o nome do arquivo mas a
+**contagem** subiu na medida dos anexos enviados, conta como conferido. Antes de repetir um anexo que
+"falhou", o robô confere se ele não entrou mesmo assim (evita duplicar).
+
 ## Estrutura
 
 ```
@@ -363,7 +391,7 @@ scripts/gerar_base_ficticia.py · scripts/diagnostico_sap.py · scripts/verifica
 src/arquivos/sharepoint_local.py  link do SharePoint → pasta sincronizada; base mais recente
 src/ambiente.py            resolve base e documentos reais (ou para com mensagem clara)
 src/utils/nomes.py         processo→pasta ('/'→'-'), conferência de anexos, normalização do critério
-tests/                     226 testes (base, arquivos, processador, SapPedidos c/ sessão falsa, main ponta a ponta)
+tests/                     235 testes (base, arquivos, processador, SapPedidos c/ sessão falsa, main ponta a ponta)
 ```
 
 ## Próximos passos possíveis

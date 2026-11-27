@@ -150,6 +150,10 @@ class Processador:
         # 2) pedido no SAP + o que já está anexado
         self.sap.abrir_pedido(item.pedido)
         titulos = self.sap.listar_anexos()
+        lista_legivel_antes = getattr(self.sap, "ultima_lista_legivel", True)
+        if not lista_legivel_antes:
+            self.log.warning("  Não consegui ler a lista de anexos do pedido: não sei o que já está "
+                             "anexado (pode duplicar anexos que já existiam)")
         novos = anexos_pendentes(arquivos, titulos)
         ja_tinha = [a.name for a in arquivos if a not in novos]
 
@@ -172,13 +176,30 @@ class Processador:
 
         # 4) confere que cada arquivo apareceu na lista de anexos do pedido
         # (com a lista COMPLETA da pasta: nome-base repetido só se resolve olhando todos juntos)
-        faltando = [a.name for a in anexos_pendentes(arquivos, self.sap.listar_anexos())]
+        titulos_depois = self.sap.listar_anexos()
+        lista_legivel_depois = getattr(self.sap, "ultima_lista_legivel", True)
+        faltando = [a.name for a in anexos_pendentes(arquivos, titulos_depois)]
+        nota = ""
         if faltando:
-            raise AnexoNaoConfirmadoError(f"Enviado, mas não consta na lista de anexos: {faltando}")
+            if not lista_legivel_depois:
+                # A tabela não foi encontrada: [] NÃO quer dizer "sem anexos". O SAP aceitou cada anexo
+                # sem erro, então não vale transformar o sucesso em ERRO por falha de conferência.
+                self.log.warning("  Lista de anexos ilegível: não deu para conferir %s; considerando "
+                                 "concluído porque o SAP aceitou os anexos sem erro", faltando)
+                nota = " [sem conferência: tabela de anexos ilegível]"
+            elif lista_legivel_antes and len(titulos_depois) >= len(titulos) + len(feitos):
+                # Os títulos na tabela não batem com o nome do arquivo, mas entrou 1 linha por anexo.
+                self.log.info("  Conferido pela contagem da lista (%d -> %d anexos)",
+                              len(titulos), len(titulos_depois))
+                nota = " [conferido pela contagem da lista]"
+            else:
+                raise AnexoNaoConfirmadoError(
+                    f"Enviado, mas não consta na lista de anexos: {faltando}")
 
         msg = f"{len(feitos)} arquivo(s) anexado(s)"
         if ja_tinha:
             msg += f" ({len(ja_tinha)} já estava(m) anexado(s))"
+        msg += nota
         return Resultado(item, CONCLUIDO, msg, anexados=feitos, ja_existiam=ja_tinha)
 
     def _anexar_com_retentativa(self, arquivo) -> None:
@@ -193,7 +214,21 @@ class Processador:
                 if tentativa == total:
                     raise
                 self.sap.limpar_popups()
+                if self._ja_consta_no_pedido(arquivo):
+                    self.log.warning("  '%s' já consta na lista de anexos do pedido: não repito o "
+                                     "anexo (evita duplicar)", arquivo.name)
+                    return
                 time.sleep(1)
+
+    def _ja_consta_no_pedido(self, arquivo) -> bool:
+        """Antes de repetir um anexo que 'falhou', confere se ele não entrou mesmo assim."""
+        try:
+            titulos = self.sap.listar_anexos()
+            if not titulos or not getattr(self.sap, "ultima_lista_legivel", True):
+                return False  # sem lista confiável: não dá para afirmar nada
+            return not anexos_pendentes([arquivo], titulos)
+        except Exception:
+            return False
 
     def _fechar_duplicatas(self, resumo: ResumoExecucao) -> None:
         """Linha repetida (mesmo pedido, outro material) recebe o status da linha original."""

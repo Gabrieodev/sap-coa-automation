@@ -279,3 +279,49 @@ def test_falha_ao_encerrar_nao_muda_o_resultado(tmp_path, log):
             raise RuntimeError("sessão caiu")
     r = _proc(tmp_path, log, SapQueFalhaAoEncerrar(), ["COA.pdf"]).executar()
     assert r.contagem() == {CONCLUIDO: 1}
+
+
+# ------------------------------------------------------------------ conferência que não transforma sucesso em ERRO
+def test_tabela_de_anexos_ilegivel_depois_de_anexar_nao_vira_erro(tmp_path, log):
+    """O SAP aceitou o anexo, mas a tabela da 'Lista de anexos' não foi encontrada (devolve []).
+    Antes isso virava ERRO 'Enviado, mas não consta na lista' mesmo com o anexo no pedido."""
+    sap = SapSimulado(lista_ilegivel=True)
+    r = _proc(tmp_path, log, sap, ["COA.pdf"]).executar()
+    assert r.contagem() == {CONCLUIDO: 1}
+    assert "sem conferência" in r.resultados[0].mensagem
+
+
+def test_tabela_legivel_sem_o_arquivo_continua_sendo_erro(tmp_path, log):
+    """Lista lida normalmente e o arquivo não está nela: aí sim é falha de verdade."""
+    sap = SapSimulado(nao_confirma={"4500000001"}, anexos_iniciais={"4500000001": ["OUTRO"]})
+    r = _proc(tmp_path, log, sap, ["COA.pdf"]).executar()
+    assert r.contagem() == {ERRO: 1} and "não consta na lista" in r.resultados[0].mensagem
+
+
+def test_titulo_diferente_do_nome_do_arquivo_confere_pela_contagem(tmp_path, log):
+    """A coluna lida mostra outra coisa (ex.: 'PDF'), mas entrou uma linha por anexo."""
+    sap = SapSimulado(titulo_na_lista="PDF")
+    r = _proc(tmp_path, log, sap, ["COA.pdf", "invoice.pdf"]).executar()
+    assert r.contagem() == {CONCLUIDO: 1} and "contagem" in r.resultados[0].mensagem
+
+
+def test_falha_depois_de_anexar_nao_repete_o_anexo(tmp_path, log):
+    """O anexo entrou, mas a rotina de janelas acusou erro (ex.: demorou). A retentativa não pode duplicar."""
+    sap = SapSimulado(falha_depois_de_anexar={"COA.pdf"})
+    r = _proc(tmp_path, log, sap, ["COA.pdf"]).executar()
+    assert r.contagem() == {CONCLUIDO: 1}
+    assert len([c for c in sap.chamadas if c[0] == "anexar"]) == 1
+
+
+def test_falha_que_nao_anexou_nada_ainda_e_repetida(tmp_path, log):
+    sap = SapSimulado(falha_anexo={"COA.pdf"})
+    r = _proc(tmp_path, log, sap, ["COA.pdf"]).executar()
+    assert r.contagem() == {ERRO: 1}
+    assert len([c for c in sap.chamadas if c[0] == "anexar"]) == 2        # tentativas_anexo = 2
+
+
+def test_sem_lista_confiavel_a_retentativa_acontece_como_antes(tmp_path, log):
+    """Limitação conhecida: com a tabela ilegível não há como saber se entrou, então repete."""
+    sap = SapSimulado(lista_ilegivel=True, falha_depois_de_anexar={"COA.pdf"})
+    r = _proc(tmp_path, log, sap, ["COA.pdf"]).executar()
+    assert len([c for c in sap.chamadas if c[0] == "anexar"]) == 2

@@ -64,7 +64,8 @@ def _conectar_sap_real(cfg, log):
     from src.sap.navegacao import SapNavigation
     from src.sap.pedidos import SapPedidos
     nav = SapNavigation(fechar_menu=teclado.esc, enviar_teclas=teclado.enviar)  # levanta SapNaoAbertoError / SapNaoLogadoError se for o caso
-    dialogo = DialogoArquivo(cfg.timeout_dialogo_arquivo, espera_seguranca=cfg.espera_janela_seguranca)
+    dialogo = DialogoArquivo(cfg.timeout_dialogo_arquivo, espera_seguranca=cfg.espera_janela_seguranca,
+                            log=log)
     return SapPedidos(nav, dialogo, cfg.transacao,
                       cfg.timeout_sap, cfg.coluna_titulo_anexos, log)
 
